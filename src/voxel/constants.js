@@ -11,6 +11,8 @@ export const BLOCK_STONE = 3;
 export const BLOCK_GRASS_PLANT = 4;
 export const BLOCK_LOG = 5;
 export const BLOCK_LEAVES = 6;
+export const BLOCK_LOG_DARK = 7;
+export const BLOCK_LEAVES_DARK = 8;
 export const BLOCK_TYPES = [
   BLOCK_AIR,
   BLOCK_GRASS,
@@ -19,15 +21,19 @@ export const BLOCK_TYPES = [
   BLOCK_GRASS_PLANT,
   BLOCK_LOG,
   BLOCK_LEAVES,
+  BLOCK_LOG_DARK,
+  BLOCK_LEAVES_DARK,
 ];
 export const BLOCK_COLORS = {
   [BLOCK_AIR]: new Float32Array([0, 0, 0]),
-  [BLOCK_GRASS]: new Float32Array([0.36, 0.71, 0.29]),
-  [BLOCK_DIRT]: new Float32Array([0.55, 0.38, 0.24]),
-  [BLOCK_STONE]: new Float32Array([0.6, 0.6, 0.62]),
+  [BLOCK_GRASS]: new Float32Array([0.46, 0.85, 0.38]),
+  [BLOCK_DIRT]: new Float32Array([0.69, 0.45, 0.24]),
+  [BLOCK_STONE]: new Float32Array([0.68, 0.71, 0.72]),
   [BLOCK_GRASS_PLANT]: new Float32Array([0.4, 0.7, 0.35]),
   [BLOCK_LOG]: new Float32Array([0.45, 0.29, 0.18]),
   [BLOCK_LEAVES]: new Float32Array([0.28, 0.6, 0.3]),
+  [BLOCK_LOG_DARK]: new Float32Array([0.25, 0.18, 0.12]),
+  [BLOCK_LEAVES_DARK]: new Float32Array([0.1, 0.3, 0.12]),
 };
 export const BLOCK_TILE_INDEX = {
   [BLOCK_GRASS]: 0,
@@ -38,8 +44,12 @@ export const BLOCK_TILE_INDEX = {
   log_side: 4,
   log_top: 5,
   [BLOCK_LEAVES]: 6,
+  log_dark_side: 7,
+  log_dark_top: 8,
+  leaves_dark: 9,
+  grass_side: 10,
 };
-export const GRASS_SIDE_TILE = 1;
+export const GRASS_SIDE_TILE = BLOCK_TILE_INDEX.grass_side;
 export const GRASS_TOP_TILE = 0;
 export const GRASS_BOTTOM_TILE = 1;
 export const PLAYER_SETTINGS = {
@@ -60,6 +70,8 @@ export function isSolidBlock(t) {
     t === BLOCK_DIRT ||
     t === BLOCK_STONE ||
     t === BLOCK_LOG ||
-    t === BLOCK_LEAVES
+    t === BLOCK_LEAVES ||
+    t === BLOCK_LOG_DARK ||
+    t === BLOCK_LEAVES_DARK
   );
 }

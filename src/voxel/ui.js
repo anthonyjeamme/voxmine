@@ -10,6 +10,7 @@ export class InventoryUI {
     this.invHotbarEl = document.getElementById("inv-hotbar");
     this.open = false;
     this.render();
+    this.inventory.addListener(() => this.render());
     window.addEventListener("keydown", (e) => {
       if (e.code === "KeyI" || e.code === "Escape") this.toggle();
       if (e.code.startsWith("Digit")) {
@@ -18,6 +19,19 @@ export class InventoryUI {
         this.render();
       }
     });
+    window.addEventListener(
+      "wheel",
+      (e) => {
+        if (this.open) return;
+        const delta = e.deltaY || 0;
+        const dir = delta > 0 ? 1 : -1;
+        const cols = this.inventory.gridCols;
+        const next = (this.inventory.activeIndex + dir + cols) % cols;
+        this.inventory.setActiveIndex(next);
+        this.render();
+      },
+      { passive: true }
+    );
   }
   toggle() {
     this.open = !this.open;

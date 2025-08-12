@@ -37,6 +37,12 @@ export class TerrainGenerator {
     const rng = mulberry32(hashStringToInt(seed));
     this.noise2d = createNoise2D(rng);
   }
+  sampleBiomeField(x, z) {
+    return 0;
+  }
+  getBiomeAt(x, z) {
+    return "plains";
+  }
   getHeightAt(x, z) {
     const scale1 = 1 / 64;
     const scale2 = 1 / 24;
@@ -52,8 +58,6 @@ export class TerrainGenerator {
   }
   getBlockAt(x, y, z, columnHeight) {
     if (y > columnHeight) {
-      if (y === columnHeight + 1 && Math.random() < 0.03)
-        return BLOCK_GRASS_PLANT;
       return BLOCK_AIR;
     }
     if (y === columnHeight) return BLOCK_GRASS;
@@ -69,12 +73,16 @@ export class World {
     this.chunks = new Map();
     this.toBuild = [];
     this.atlas = null;
+    this.services = null;
   }
 
   plantTreesInChunk(chunk) {
-    const rng =
-      Math.abs(Math.sin(chunk.chunkX * 12.9898 + chunk.chunkZ * 78.233)) % 1;
-    const trees = Math.floor(rng * 3); // 0..2
+    // densité dépend du biome
+    const centerX = chunk.chunkX * CHUNK_SIZE + CHUNK_SIZE / 2;
+    const centerZ = chunk.chunkZ * CHUNK_SIZE + CHUNK_SIZE / 2;
+    const biome = this.generator.getBiomeAt(centerX, centerZ);
+    const baseDensity = biome === "dark_forest" ? 6 : 2; // arbres/chunk approx
+    const trees = baseDensity;
     const changed = new Set();
     for (let i = 0; i < trees; i++) {
       const lx =
@@ -84,7 +92,10 @@ export class World {
       const wx = chunk.chunkX * CHUNK_SIZE + lx;
       const wz = chunk.chunkZ * CHUNK_SIZE + lz;
       const groundY = this.generator.getHeightAt(wx, wz);
-      this.generateTree(wx, groundY + 1, wz, changed);
+      const biome = this.generator.getBiomeAt(wx, wz);
+      if (biome === "dark_forest")
+        this.generateDarkTree(wx, groundY + 1, wz, changed);
+      else this.generateTree(wx, groundY + 1, wz, changed);
     }
     for (const key of changed) {
       const ch = this.chunks.get(key);
@@ -115,6 +126,34 @@ export class World {
         }
       }
     }
+    const cap = 1 + Math.floor(Math.random() * 2);
+    for (let i = 1; i <= cap; i++)
+      this.setBlockDeferred(x, y + height - 1 + i, z, 5, changed);
+  }
+
+  generateDarkTree(x, y, z, changed) {
+    const height = 6 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < height; i++)
+      this.setBlockDeferred(x, y + i, z, 7, changed); // LOG_DARK
+    const radius = 3 + Math.floor(Math.random() * 2);
+    for (let dy = -1; dy <= 3; dy++) {
+      const r = radius - Math.floor(Math.abs(dy) * 0.6);
+      for (let dx = -r; dx <= r; dx++) {
+        for (let dz = -r; dz <= r; dz++) {
+          if (dx * dx + dz * dz <= r * r + 1)
+            this.setBlockDeferred(
+              x + dx,
+              y + height - 1 + dy,
+              z + dz,
+              8,
+              changed
+            ); // LEAVES_DARK
+        }
+      }
+    }
+    const cap = 1 + Math.floor(Math.random() * 2);
+    for (let i = 1; i <= cap; i++)
+      this.setBlockDeferred(x, y + height - 1 + i, z, 7, changed);
   }
 
   setBlockDeferred(x, y, z, type, changed) {
@@ -132,6 +171,10 @@ export class World {
 
   setAtlas(atlas) {
     this.atlas = atlas;
+  }
+
+  setServices(services) {
+    this.services = services;
   }
 
   getLoadedChunkCount() {

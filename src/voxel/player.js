@@ -7,6 +7,8 @@ import {
   BLOCK_DIRT,
   BLOCK_STONE,
 } from "./constants.js";
+import { isSolid, faceTile } from "./blocks.js";
+import { itemIdToBlockType, blockTypeToItemId } from "./items.js";
 
 export class Player {
   constructor(camera, world) {
@@ -37,6 +39,12 @@ export class Player {
     };
     this.inputEnabled = true;
     this.placeDrag = { active: false, anchor: null, normal: null, axis: "x" };
+    this.mineAudio = new Audio("/sounds/mine.ogg");
+    this.mineAudio.loop = true;
+    this.mineAudio.volume = 0.4;
+    this.walkAudio = new Audio("/sounds/walk.ogg");
+    this.walkAudio.loop = true;
+    this.walkAudio.volume = 0.35;
   }
 
   initInput() {
@@ -91,7 +99,15 @@ export class Player {
   setMouseLeft(down) {
     if (!this.inputEnabled) return;
     this.mouseLeftDown = down;
-    if (!down) this.breaking.active = false;
+    if (!down) {
+      this.breaking.active = false;
+      if (this.mineAudio) {
+        this.mineAudio.pause();
+        try {
+          this.mineAudio.currentTime = 0;
+        } catch {}
+      }
+    }
   }
 
   setInputEnabled(enabled) {
@@ -107,6 +123,18 @@ export class Player {
       this.keys.clear();
       this.mouseLeftDown = false;
       this.breaking.active = false;
+      if (this.mineAudio) {
+        this.mineAudio.pause();
+        try {
+          this.mineAudio.currentTime = 0;
+        } catch {}
+      }
+      if (this.walkAudio) {
+        this.walkAudio.pause();
+        try {
+          this.walkAudio.currentTime = 0;
+        } catch {}
+      }
     }
   }
 
@@ -167,14 +195,19 @@ export class Player {
         axis = Math.abs(f.x) >= Math.abs(f.z) ? "x" : "z";
       else axis = Math.abs(f.x) >= Math.abs(f.y) ? "x" : "y";
       this.placeDrag.axis = axis;
-      if (this.world && this.world.scene && this.world.scene.__ghosts)
-        this.world.scene.__ghosts.showPositions([
-          {
-            x: this.placeDrag.anchor.x,
-            y: this.placeDrag.anchor.y,
-            z: this.placeDrag.anchor.z,
-          },
-        ]);
+      const inv = this.world?.scene?.__drops?.inventory || null;
+      const active = inv && inv.getActive ? inv.getActive() : null;
+      if (this.world && this.world.scene && this.world.scene.__ghosts) {
+        if (active && active.count > 0)
+          this.world.scene.__ghosts.showPositions([
+            {
+              x: this.placeDrag.anchor.x,
+              y: this.placeDrag.anchor.y,
+              z: this.placeDrag.anchor.z,
+            },
+          ]);
+        else this.world.scene.__ghosts.hideAll();
+      }
     }
   }
 
@@ -214,10 +247,25 @@ export class Player {
     }
     if (this.world && this.world.scene && this.world.scene.__ghosts)
       this.world.scene.__ghosts.hideAll();
-    for (const p of positions) {
-      if (!this.isInsidePlayerAABB(p.x, p.y, p.z))
-        this.world.setBlock(p.x, p.y, p.z, this.blockType);
+    // determine block type strictly from active hotbar item
+    const inv = this.world?.scene?.__drops?.inventory || null;
+    const active = inv && inv.getActive ? inv.getActive() : null;
+    if (!active) {
+      this.placeDrag.active = false;
+      return;
     }
+    const placeType = itemIdToBlockType(active.id);
+    if (placeType == null || !active.count || active.count <= 0) {
+      this.placeDrag.active = false;
+      return;
+    }
+    const maxPlace = Math.min(positions.length, active.count);
+    for (let i = 0; i < maxPlace; i++) {
+      const p = positions[i];
+      if (!this.isInsidePlayerAABB(p.x, p.y, p.z))
+        this.world.setBlock(p.x, p.y, p.z, placeType);
+    }
+    inv.removeFromActive(maxPlace);
     this.placeDrag.active = false;
   }
 
@@ -255,8 +303,13 @@ export class Player {
       const pz = this.placeDrag.anchor.z + (axis === "z" ? i * step : 0);
       positions.push({ x: px, y: py, z: pz });
     }
-    if (this.world && this.world.scene && this.world.scene.__ghosts)
-      this.world.scene.__ghosts.showPositions(positions);
+    const inv = this.world?.scene?.__drops?.inventory || null;
+    const active = inv && inv.getActive ? inv.getActive() : null;
+    if (this.world && this.world.scene && this.world.scene.__ghosts) {
+      if (active && active.count > 0)
+        this.world.scene.__ghosts.showPositions(positions);
+      else this.world.scene.__ghosts.hideAll();
+    }
   }
 
   isInsidePlayerAABB(x, y, z) {
@@ -372,6 +425,22 @@ export class Player {
     this.integrateWithCollisions(deltaSeconds);
     this.applyCamera();
 
+    const wantMove =
+      this.moveState.forward ||
+      this.moveState.backward ||
+      this.moveState.left ||
+      this.moveState.right;
+    if (this.isOnGround && wantMove) {
+      if (this.walkAudio) this.walkAudio.play().catch(() => {});
+    } else {
+      if (this.walkAudio) {
+        this.walkAudio.pause();
+        try {
+          this.walkAudio.currentTime = 0;
+        } catch {}
+      }
+    }
+
     const aim = this.getAimHit(6);
     if (this.mouseLeftDown && aim && aim.hit) {
       if (!this.breaking.active || !this.sameTarget(aim)) {
@@ -381,9 +450,13 @@ export class Player {
           progress: 0,
           timeToBreak: 0.6,
         };
-        if (this.world && this.world.scene && this.world.scene.__highlighter) {
-          const tileIndex = 0; // fallback grass tile for preview
-          this.world.scene.__highlighter.showBreakingPreview(
+        if (this.mineAudio) this.mineAudio.play().catch(() => {});
+        const svc = this.world.services || this.world.scene;
+        if ((svc && svc.__highlighter) || (svc && svc.highlighter)) {
+          const t = this.world.getBlock(aim.voxel.x, aim.voxel.y, aim.voxel.z);
+          const tileIndex = faceTile(t, [0, 1, 0]);
+          const hl = svc.highlighter || svc.__highlighter;
+          hl.showBreakingPreview(
             aim.voxel.x,
             aim.voxel.y,
             aim.voxel.z,
@@ -392,7 +465,8 @@ export class Player {
         }
       } else {
         this.breaking.progress += deltaSeconds;
-        if (this.world && this.world.scene && this.world.scene.__particles) {
+        const svc = this.world.services || this.world.scene;
+        if (svc && (svc.particles || svc.__particles)) {
           const origin = new THREE.Vector3(
             aim.voxel.x + 0.5,
             aim.voxel.y + 0.5,
@@ -401,13 +475,8 @@ export class Player {
           // strong forward-biased dust while mining
           const dir = new THREE.Vector3();
           this.camera.getWorldDirection(dir);
-          this.world.scene.__particles.spawnDustDirected(
-            origin,
-            dir,
-            0xffffff,
-            90,
-            deltaSeconds
-          );
+          const ps = svc.particles || svc.__particles;
+          ps.spawnDustDirected(origin, dir, 0xffffff, 90, deltaSeconds);
         }
         if (this.breaking.progress >= this.breaking.timeToBreak) {
           const blockType = this.world.getBlock(
@@ -421,17 +490,13 @@ export class Player {
             aim.voxel.y + 0.5,
             aim.voxel.z + 0.5
           );
-          if (this.world && this.world.scene && this.world.scene.__drops) {
-            const itemId =
-              blockType === 1
-                ? "dirt"
-                : blockType === 2
-                ? "dirt"
-                : blockType === 3
-                ? "stone"
-                : null;
+          const svc2 = this.world.services || this.world.scene;
+          if (svc2 && (svc2.drops || svc2.__drops)) {
+            const itemId = blockTypeToItemId
+              ? blockTypeToItemId(blockType)
+              : null;
             if (itemId)
-              this.world.scene.__drops.spawn(
+              (svc2.drops || svc2.__drops).spawn(
                 itemId,
                 new THREE.Vector3(
                   aim.voxel.x + 0.5,
@@ -441,12 +506,25 @@ export class Player {
               );
           }
           this.breaking.active = false;
+          if (this.mineAudio) {
+            this.mineAudio.pause();
+            try {
+              this.mineAudio.currentTime = 0;
+            } catch {}
+          }
         }
       }
     } else {
       this.breaking.active = false;
-      if (this.world && this.world.scene && this.world.scene.__highlighter)
-        this.world.scene.__highlighter.hide();
+      if (this.mineAudio) {
+        this.mineAudio.pause();
+        try {
+          this.mineAudio.currentTime = 0;
+        } catch {}
+      }
+      const svc = this.world.services || this.world.scene;
+      if (svc && (svc.highlighter || svc.__highlighter))
+        (svc.highlighter || svc.__highlighter).hide();
     }
   }
 
@@ -513,7 +591,7 @@ export class Player {
       for (let y = minY; y <= maxY; y++) {
         for (let z = minZ; z <= maxZ; z++) {
           const b = this.world.getBlock(x, y, z);
-          if (b && b !== BLOCK_AIR) return true;
+          if (isSolid(b)) return true;
         }
       }
     }

@@ -10,10 +10,12 @@ import { Inventory } from "./voxel/inventory.js";
 import { InventoryUI } from "./voxel/ui.js";
 import { DropsManager } from "./voxel/drops.js";
 import { ItemId, blockTypeToItemId } from "./voxel/items.js";
+import { createAudioEngine } from "./audio.js";
 import { createGhostLine } from "./voxel/ghosts.js";
 
 const appContainer = document.getElementById("app");
 const statsEl = document.getElementById("stats");
+const clockEl = document.getElementById("clock");
 const playButton = document.getElementById("play");
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -49,18 +51,19 @@ const atlas = createAtlasTexture(renderer);
 world.setAtlas(atlas);
 const highlighter = createHighlighter(scene, atlas);
 const particles = new ParticleSystem(scene);
-scene.__particles = particles;
 const inventory = new Inventory();
 const invUI = new InventoryUI(inventory, player);
-const drops = new DropsManager(scene, inventory);
-scene.__drops = drops;
+const drops = new DropsManager(scene, inventory, world);
 const ghosts = createGhostLine(scene);
-scene.__ghosts = ghosts;
+const services = { highlighter, particles, drops, ghosts };
+world.setServices(services);
+scene.__particles = particles; // TEMP: compat
+scene.__drops = drops; // TEMP: compat
+scene.__ghosts = ghosts; // TEMP: compat
+scene.__highlighter = highlighter; // TEMP: compat
 scene.__highlighter = highlighter;
 
-const music = new Audio("/musics/music1.mp3");
-music.loop = true;
-music.volume = 0.3;
+const audio = createAudioEngine();
 
 const skyPresets = [
   {
@@ -117,20 +120,87 @@ document.addEventListener("keydown", onToggleSky, true);
 function onToggleMusic(e) {
   const isO = e.code === "KeyO" || e.key === "o" || e.key === "O";
   if (!isO) return;
-  if (music.paused) music.play().catch(() => {});
-  else music.pause();
+  audio.toggleEnabled();
+  const px = player.position.x;
+  const pz = player.position.z;
+  const biome = world.generator.getBiomeAt(px, pz);
+  audio.setThemeForBiome(biome);
 }
 document.addEventListener("keydown", onToggleMusic, true);
 
 const pointer = createPointerLock(renderer.domElement, player);
 playButton.addEventListener("click", () => {
   pointer.requestLock();
-  music.play().catch(() => {});
+  const px = player.position.x;
+  const pz = player.position.z;
+  const biome = world.generator.getBiomeAt(px, pz);
+  audio.setThemeForBiome(biome);
 });
 
 let previousTimeMs = performance.now();
 let frameCounter = 0;
 let lastFpsUpdateMs = previousTimeMs;
+const DAY_LENGTH_MS = 600000;
+let gameTimeMs = DAY_LENGTH_MS * (8 / 24);
+
+function lerpColor(a, b, t) {
+  const ca = new THREE.Color(a);
+  const cb = new THREE.Color(b);
+  return ca.lerp(cb, t);
+}
+
+function applyDayNight(time01) {
+  const hour = time01 * 24;
+  let daylight = 0;
+  let theta = null;
+  if (hour >= 6 && hour < 8) {
+    const u = (hour - 6) / 2;
+    const s = u * u * (3 - 2 * u);
+    daylight = s;
+    theta = s * (Math.PI * 0.5);
+  } else if (hour >= 8 && hour < 18) {
+    daylight = 1;
+    theta = Math.PI * 0.5;
+  } else if (hour >= 18 && hour < 22) {
+    const u = (hour - 18) / 4;
+    const s = u * u * (3 - 2 * u);
+    daylight = 1 - s;
+    theta = Math.PI * 0.5 + s * (Math.PI * 0.5);
+  } else {
+    daylight = 0;
+    theta = null;
+  }
+  const skyDay = 0x87ceeb;
+  const skyNight = 0x020307;
+  const bg = lerpColor(skyNight, skyDay, daylight);
+  scene.background = bg;
+  const hemiTopDay = 0xbfd4ff;
+  const hemiTopNight = 0x3b4a6b;
+  const hemiBotDay = 0x3f3f3f;
+  const hemiBotNight = 0x060607;
+  const top = lerpColor(hemiTopNight, hemiTopDay, daylight);
+  const bottom = lerpColor(hemiBotNight, hemiBotDay, daylight);
+  ambientLight.color.copy(top);
+  ambientLight.groundColor.copy(bottom);
+  ambientLight.intensity = 0.02 + 0.98 * daylight;
+  sunLight.intensity = 1.0 * daylight;
+  const r = 300;
+  if (theta !== null) {
+    sunLight.position.set(Math.cos(theta) * r, Math.sin(theta) * r, 0);
+  } else {
+    sunLight.position.set(-r * 0.2, -50, 0);
+  }
+}
+
+function updateClock() {
+  const t01 = (gameTimeMs % DAY_LENGTH_MS) / DAY_LENGTH_MS;
+  const hFloat = t01 * 24;
+  const h = Math.floor(hFloat);
+  const m = Math.floor((hFloat - h) * 60);
+  const hs = String(h).padStart(2, "0");
+  const ms = String(m).padStart(2, "0");
+  if (clockEl) clockEl.textContent = `${hs}:${ms}`;
+}
 
 function onWindowResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -156,6 +226,17 @@ function tick() {
   previousTimeMs = now;
 
   world.updateStreaming(player.getPosition());
+
+  const px = player.position.x;
+  const pz = player.position.z;
+  const biome = "plains";
+  if (scene.fog) scene.fog = null;
+  gameTimeMs = (gameTimeMs + deltaSeconds * 1000) % DAY_LENGTH_MS;
+  const t01 = (gameTimeMs % DAY_LENGTH_MS) / DAY_LENGTH_MS;
+  applyDayNight(t01);
+  audio.setThemeForBiome(biome);
+  audio.update();
+
   player.update(deltaSeconds);
   player.updatePlaceDragPreview();
   particles.update(deltaSeconds);
@@ -167,6 +248,7 @@ function tick() {
 
   renderer.render(scene, camera);
   updateHud(now);
+  updateClock();
   requestAnimationFrame(tick);
 }
 

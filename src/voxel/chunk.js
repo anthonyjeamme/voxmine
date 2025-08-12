@@ -5,12 +5,14 @@ import {
   BLOCK_AIR,
   BLOCK_COLORS,
   BLOCK_TILE_INDEX,
-  GRASS_SIDE_TILE,
-  GRASS_TOP_TILE,
-  GRASS_BOTTOM_TILE,
-  BLOCK_GRASS_PLANT,
-  isSolidBlock,
 } from "./constants.js";
+import {
+  renderKind,
+  faceTile,
+  isSolid,
+  usesAlphaTest,
+  RenderKind,
+} from "./blocks.js";
 import { getTileUV } from "./textures.js";
 
 const directions = [
@@ -18,10 +20,10 @@ const directions = [
     // +X
     dir: [1, 0, 0],
     norm: [1, 0, 0],
-    uAxis: [0, 1, 0], // Y
-    vAxis: [0, 0, 1], // Z
-    uIndex: 1, // corner component for u
-    vIndex: 2, // corner component for v
+    uAxis: [0, 0, 1], // Z (horizontal)
+    vAxis: [0, 1, 0], // Y (vertical)
+    uIndex: 2,
+    vIndex: 1,
     corners: [
       [1, 0, 0],
       [1, 1, 0],
@@ -33,10 +35,10 @@ const directions = [
     // -X
     dir: [-1, 0, 0],
     norm: [-1, 0, 0],
-    uAxis: [0, 1, 0],
-    vAxis: [0, 0, 1],
-    uIndex: 1,
-    vIndex: 2,
+    uAxis: [0, 0, 1], // Z (horizontal)
+    vAxis: [0, 1, 0], // Y (vertical)
+    uIndex: 2,
+    vIndex: 1,
     corners: [
       [0, 0, 1],
       [0, 1, 1],
@@ -169,12 +171,42 @@ export class Chunk {
   }
 
   buildMesh(atlas) {
-    const positions = [];
-    const normals = [];
-    const uvs = [];
-    const colors = [];
-    const indices = [];
-    let indexOffset = 0;
+    const opaque = {
+      positions: [],
+      normals: [],
+      uvs: [],
+      colors: [],
+      indices: [],
+      indexOffset: 0,
+    };
+    const cutout = {
+      positions: [],
+      normals: [],
+      uvs: [],
+      colors: [],
+      indices: [],
+      indexOffset: 0,
+    };
+    const pushFace = (bucket, face, x, y, z, uvOrder, aoFunc) => {
+      for (let i = 0; i < 4; i++) {
+        const c = face.corners[i];
+        bucket.positions.push(x + c[0], y + c[1], z + c[2]);
+        bucket.normals.push(face.norm[0], face.norm[1], face.norm[2]);
+        const uv = uvOrder[i];
+        bucket.uvs.push(uv[0], uv[1]);
+        const ao = aoFunc ? aoFunc(i) : 1;
+        bucket.colors.push(ao, ao, ao);
+      }
+      bucket.indices.push(
+        bucket.indexOffset,
+        bucket.indexOffset + 1,
+        bucket.indexOffset + 2,
+        bucket.indexOffset,
+        bucket.indexOffset + 2,
+        bucket.indexOffset + 3
+      );
+      bucket.indexOffset += 4;
+    };
 
     for (let x = 0; x < CHUNK_SIZE; x++) {
       for (let y = 0; y < CHUNK_HEIGHT; y++) {
@@ -182,22 +214,36 @@ export class Chunk {
           const type = this.getBlockLocal(x, y, z);
           if (type === BLOCK_AIR) continue;
           const color = BLOCK_COLORS[type];
-          if (type === BLOCK_GRASS_PLANT) {
-            const { u0, v0, u1, v1 } = getTileUV(BLOCK_TILE_INDEX[type], atlas);
+          if (renderKind(type) === RenderKind.Cross) {
+            const { u0, v0, u1, v1 } = getTileUV(
+              faceTile(type, [0, 1, 0]),
+              atlas
+            );
             const cross = [
-              // plane 1 (vertical diag: (0,*,0) -> (1,*,1))
               [
                 [0, 0, 0],
                 [1, 0, 1],
                 [1, 1, 1],
                 [0, 1, 0],
               ],
-              // plane 2 (vertical diag: (1,*,0) -> (0,*,1))
               [
                 [1, 0, 0],
                 [0, 0, 1],
                 [0, 1, 1],
                 [1, 1, 0],
+              ],
+              // duplicate backfaces so la plante est visible des deux côtés
+              [
+                [0, 1, 0],
+                [1, 1, 1],
+                [1, 0, 1],
+                [0, 0, 0],
+              ],
+              [
+                [1, 1, 0],
+                [0, 1, 1],
+                [0, 0, 1],
+                [1, 0, 0],
               ],
             ];
             for (const plane of cross) {
@@ -207,54 +253,55 @@ export class Chunk {
                 [u1, v0],
                 [u0, v0],
               ];
-              for (let i = 0; i < 4; i++) {
-                const c = plane[i];
-                positions.push(x + c[0], y + c[1], z + c[2]);
-                normals.push(0, 1, 0);
-                const uv = uvOrder[i];
-                uvs.push(uv[0], uv[1]);
-                colors.push(1, 1, 1);
-              }
-              indices.push(
-                indexOffset,
-                indexOffset + 1,
-                indexOffset + 2,
-                indexOffset,
-                indexOffset + 2,
-                indexOffset + 3
+              pushFace(
+                cutout,
+                { corners: plane, norm: [0, 1, 0] },
+                x,
+                y,
+                z,
+                uvOrder
               );
-              indexOffset += 4;
             }
             continue;
           }
+          const isOpaqueBlock = (t) =>
+            isSolid(t) &&
+            !usesAlphaTest(t) &&
+            renderKind(t) !== RenderKind.Cross;
           for (const face of directions) {
             const nx = x + face.dir[0];
             const ny = y + face.dir[1];
             const nz = z + face.dir[2];
             const neighbor = this.getBlockLocal(nx, ny, nz);
-            if (!isSolidBlock(neighbor)) {
-              let tile = BLOCK_TILE_INDEX[type] ?? 0;
-              if (type !== BLOCK_AIR && type === 1) {
-                if (face.norm[1] === 1) tile = GRASS_TOP_TILE;
-                else if (face.norm[1] === -1) tile = GRASS_BOTTOM_TILE;
-                else tile = GRASS_SIDE_TILE;
-              }
-              if (type === 5) {
-                // LOG
-                if (face.norm[1] !== 0) tile = BLOCK_TILE_INDEX["log_top"];
-                else tile = BLOCK_TILE_INDEX["log_side"];
-              }
-              if (type === 6) {
-                // LEAVES
-                tile = BLOCK_TILE_INDEX[6];
-              }
+            if (!isOpaqueBlock(neighbor)) {
+              let tile = faceTile(type, face.norm);
               const { u0, v0, u1, v1 } = getTileUV(tile, atlas);
-              const uvOrder = [
-                [u0, v0],
-                [u1, v0],
-                [u1, v1],
-                [u0, v1],
-              ];
+              let uvOrder;
+              if (face.norm[0] !== 0) {
+                // X faces: make V follow Y and keep bark vertical
+                if (face.norm[0] > 0) {
+                  uvOrder = [
+                    [u0, v0],
+                    [u0, v1],
+                    [u1, v1],
+                    [u1, v0],
+                  ];
+                } else {
+                  uvOrder = [
+                    [u1, v0],
+                    [u1, v1],
+                    [u0, v1],
+                    [u0, v0],
+                  ];
+                }
+              } else {
+                uvOrder = [
+                  [u0, v0],
+                  [u1, v0],
+                  [u1, v1],
+                  [u0, v1],
+                ];
+              }
               const aoForCorner = (cornerIndex) => {
                 const uFlag =
                   face.corners[cornerIndex][face.uIndex] === 1 ? 1 : -1;
@@ -272,77 +319,76 @@ export class Chunk {
                 const cx2 = px + face.uAxis[0] * uFlag + face.vAxis[0] * vFlag;
                 const cy2 = py + face.uAxis[1] * uFlag + face.vAxis[1] * vFlag;
                 const cz2 = pz + face.uAxis[2] * uFlag + face.vAxis[2] * vFlag;
-                const side1 = isSolidBlock(this.getBlockLocal(sux, suy, suz))
+                const side1 = isSolid(this.getBlockLocal(sux, suy, suz))
                   ? 1
                   : 0;
-                const side2 = isSolidBlock(this.getBlockLocal(svx, svy, svz))
+                const side2 = isSolid(this.getBlockLocal(svx, svy, svz))
                   ? 1
                   : 0;
-                const cornerSolid = isSolidBlock(
-                  this.getBlockLocal(cx2, cy2, cz2)
-                )
+                const cornerSolid = isSolid(this.getBlockLocal(cx2, cy2, cz2))
                   ? 1
                   : 0;
-                const ao =
+                const aoRaw =
                   side1 && side2 ? 0 : 3 - (side1 + side2 + cornerSolid);
-                return ao / 3; // 0..1
+                const table = [0.45, 0.65, 0.85, 1.0];
+                return table[aoRaw];
               };
-              for (let i = 0; i < 4; i++) {
-                const c = face.corners[i];
-                positions.push(x + c[0], y + c[1], z + c[2]);
-                normals.push(face.norm[0], face.norm[1], face.norm[2]);
-                const uv = uvOrder[i];
-                uvs.push(uv[0], uv[1]);
-                const ao = aoForCorner(i);
-                colors.push(ao, ao, ao);
-              }
-              indices.push(
-                indexOffset,
-                indexOffset + 1,
-                indexOffset + 2,
-                indexOffset,
-                indexOffset + 2,
-                indexOffset + 3
-              );
-              indexOffset += 4;
+              const rk = renderKind(type);
+              const bucket =
+                rk === RenderKind.Cross || rk === RenderKind.CutoutCube
+                  ? cutout
+                  : opaque;
+              pushFace(bucket, face, x, y, z, uvOrder, aoForCorner);
             }
           }
         }
       }
     }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(new Float32Array(positions), 3)
-    );
-    geometry.setAttribute(
-      "normal",
-      new THREE.Float32BufferAttribute(new Float32Array(normals), 3)
-    );
-    geometry.setAttribute(
-      "uv",
-      new THREE.Float32BufferAttribute(new Float32Array(uvs), 2)
-    );
-    geometry.setAttribute(
-      "color",
-      new THREE.Float32BufferAttribute(new Float32Array(colors), 3)
-    );
-    geometry.setIndex(indices);
-    geometry.computeBoundingSphere();
-
-    const material = new THREE.MeshLambertMaterial({
+    const group = new THREE.Group();
+    const makeMesh = (b, mat) => {
+      if (b.positions.length === 0) return null;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(new Float32Array(b.positions), 3)
+      );
+      g.setAttribute(
+        "normal",
+        new THREE.Float32BufferAttribute(new Float32Array(b.normals), 3)
+      );
+      g.setAttribute(
+        "uv",
+        new THREE.Float32BufferAttribute(new Float32Array(b.uvs), 2)
+      );
+      g.setAttribute(
+        "color",
+        new THREE.Float32BufferAttribute(new Float32Array(b.colors), 3)
+      );
+      g.setIndex(b.indices);
+      g.computeBoundingSphere();
+      const m = new THREE.Mesh(g, mat);
+      m.castShadow = false;
+      m.receiveShadow = true;
+      return m;
+    };
+    const matOpaque = new THREE.MeshLambertMaterial({
       map: atlas.texture,
       vertexColors: true,
-      transparent: true,
+      transparent: false,
+    });
+    const matCutout = new THREE.MeshLambertMaterial({
+      map: atlas.texture,
+      vertexColors: true,
+      transparent: false,
       alphaTest: 0.5,
     });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.castShadow = false;
-    mesh.receiveShadow = true;
-    mesh.position.set(this.chunkX * CHUNK_SIZE, 0, this.chunkZ * CHUNK_SIZE);
-    this.mesh = mesh;
+    const m1 = makeMesh(opaque, matOpaque);
+    if (m1) group.add(m1);
+    const m2 = makeMesh(cutout, matCutout);
+    if (m2) group.add(m2);
+    group.position.set(this.chunkX * CHUNK_SIZE, 0, this.chunkZ * CHUNK_SIZE);
+    this.mesh = group;
     this.isDirty = false;
-    return mesh;
+    return group;
   }
 }

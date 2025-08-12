@@ -4,6 +4,17 @@ export class Inventory {
     this.gridRows = 3;
     this.slots = new Array(this.gridCols * this.gridRows).fill(null);
     this.activeIndex = 0; // first row is the hotbar
+    this.listeners = [];
+  }
+  addListener(fn) {
+    if (typeof fn === "function") this.listeners.push(fn);
+  }
+  emitChange() {
+    for (const fn of this.listeners) {
+      try {
+        fn(this);
+      } catch {}
+    }
   }
   addItem(id, count = 1) {
     const total = this.gridCols * this.gridRows;
@@ -28,18 +39,18 @@ export class Inventory {
         }
       }
     };
-    // Prefer main inventory (top-left to right, then down)
-    tryMerge(invStart, total);
-    tryPlaceEmpty(invStart, total);
-    // If still remaining, fallback to hotbar
-    if (count > 0) tryMerge(hotStart, hotEnd);
-    if (count > 0) tryPlaceEmpty(hotStart, hotEnd);
+    tryMerge(hotStart, hotEnd);
+    tryPlaceEmpty(hotStart, hotEnd);
+    if (count > 0) tryMerge(invStart, total);
+    if (count > 0) tryPlaceEmpty(invStart, total);
+    this.emitChange();
   }
   removeFromActive(count = 1) {
     const s = this.slots[this.activeIndex];
     if (!s) return false;
     s.count -= count;
     if (s.count <= 0) this.slots[this.activeIndex] = null;
+    this.emitChange();
     return true;
   }
   getActive() {
