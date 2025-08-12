@@ -8,6 +8,8 @@ import {
   BLOCK_LEAVES,
   BLOCK_LOG_DARK,
   BLOCK_LEAVES_DARK,
+  BLOCK_SAND,
+  BLOCK_SNOW,
   GRASS_TOP_TILE,
   GRASS_SIDE_TILE,
   GRASS_BOTTOM_TILE,
@@ -70,6 +72,16 @@ const registry = {
     solid: true,
     kind: RenderKind.CutoutCube,
     faceTile: () => BLOCK_TILE_INDEX["leaves_dark"] ?? 9,
+  },
+  [BLOCK_SAND]: {
+    solid: true,
+    kind: RenderKind.Cube,
+    faceTile: () => BLOCK_TILE_INDEX.sand,
+  },
+  [BLOCK_SNOW]: {
+    solid: true,
+    kind: RenderKind.Cube,
+    faceTile: () => BLOCK_TILE_INDEX.snow,
   },
 };
 

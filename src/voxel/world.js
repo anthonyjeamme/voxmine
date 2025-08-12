@@ -1,5 +1,7 @@
 import * as THREE from "three";
-import { createNoise2D } from "simplex-noise";
+import { createNoise2D, createNoise3D } from "simplex-noise";
+import { hashStringToInt, mulberry32 } from "./gen/rng.js";
+import { TerrainPipeline } from "./gen/terrain.js";
 import {
   CHUNK_SIZE,
   CHUNK_HEIGHT,
@@ -12,57 +14,68 @@ import {
   BLOCK_GRASS_PLANT,
 } from "./constants.js";
 import { Chunk } from "./chunk.js";
+import { BLOCK_SAND, BLOCK_SNOW } from "./constants.js";
 import { chunkKey, iterateNeighborhood } from "./utils.js";
-
-function hashStringToInt(str) {
-  let h = 1779033703 ^ str.length;
-  for (let i = 0; i < str.length; i++) {
-    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
-    h = (h << 13) | (h >>> 19);
-  }
-  return h >>> 0;
-}
-
-function mulberry32(a) {
-  return function () {
-    let t = (a += 0x6d2b79f5);
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 export class TerrainGenerator {
   constructor(seed) {
     const rng = mulberry32(hashStringToInt(seed));
-    this.noise2d = createNoise2D(rng);
+    this.pipeline = new TerrainPipeline(rng);
   }
   sampleBiomeField(x, z) {
     return 0;
   }
   getBiomeAt(x, z) {
+    const h = this.terrainHeight(x, z);
+    if (h <= 18) return "desert";
+    if (h >= 42) return "snowy";
     return "plains";
   }
+  terrainHeight(x, z) {
+    return this.pipeline.terrainHeight(x, z);
+  }
   getHeightAt(x, z) {
-    const scale1 = 1 / 64;
-    const scale2 = 1 / 24;
-    const n =
-      this.noise2d(x * scale1, z * scale1) * 0.7 +
-      this.noise2d(x * scale2, z * scale2) * 0.3;
-    const base = 24;
-    const amplitude = 18;
-    let height = Math.floor(base + n * amplitude);
-    if (height < 4) height = 4;
-    if (height >= CHUNK_HEIGHT) height = CHUNK_HEIGHT - 1;
-    return height;
+    return Math.floor(this.terrainHeight(x, z));
+  }
+  surfaceY(x, z) {
+    for (let y = CHUNK_HEIGHT - 2; y >= 1; y--) {
+      const solid = this.density(x, y, z) > 0;
+      const airAbove =
+        this.density(x, y + 1, z) <= 0 && this.density(x, y + 2, z) <= 0;
+      if (solid && airAbove) return y;
+    }
+    return null;
+  }
+  density(x, y, z) {
+    return this.pipeline.density(x, y, z);
   }
   getBlockAt(x, y, z, columnHeight) {
-    if (y > columnHeight) {
-      return BLOCK_AIR;
+    const dens = this.density(x, y, z);
+    if (dens <= 0) return BLOCK_AIR;
+    const sy = this.surfaceY(x, z);
+    if (sy != null) {
+      const biome = this.getBiomeAt(x, z);
+      if (y === sy) {
+        if (biome === "desert") return BLOCK_SAND;
+        if (biome === "snowy") return BLOCK_SNOW;
+        return BLOCK_GRASS;
+      }
+      if (y > sy - 4) {
+        if (biome === "desert") return BLOCK_SAND;
+        return BLOCK_DIRT;
+      }
+      return BLOCK_STONE;
     }
-    if (y === columnHeight) return BLOCK_GRASS;
-    if (y >= columnHeight - 6) return BLOCK_DIRT;
-    return BLOCK_STONE;
+    // fallback if surfaceY failed: use air-above test
+    const airAbove = this.density(x, y + 1, z) <= 0;
+    if (airAbove) return BLOCK_GRASS;
+    // shallow layer as dirt
+    let d = 0;
+    for (let i = 1; i <= 4; i++) {
+      if (this.density(x, y - i, z) > 0) d++;
+      else break;
+    }
+    return d > 0 ? BLOCK_DIRT : BLOCK_STONE;
   }
 }
 
@@ -91,11 +104,21 @@ export class World {
         Math.floor(((((i + 11) * 73) % 97) / 97) * (CHUNK_SIZE - 2)) + 1;
       const wx = chunk.chunkX * CHUNK_SIZE + lx;
       const wz = chunk.chunkZ * CHUNK_SIZE + lz;
-      const groundY = this.generator.getHeightAt(wx, wz);
-      const biome = this.generator.getBiomeAt(wx, wz);
-      if (biome === "dark_forest")
-        this.generateDarkTree(wx, groundY + 1, wz, changed);
-      else this.generateTree(wx, groundY + 1, wz, changed);
+      const sy = this.generator.surfaceY(wx, wz);
+      if (sy == null) continue;
+      // slope check
+      const s1 = this.generator.surfaceY(wx + 1, wz);
+      const s2 = this.generator.surfaceY(wx - 1, wz);
+      const s3 = this.generator.surfaceY(wx, wz + 1);
+      const s4 = this.generator.surfaceY(wx, wz - 1);
+      const neigh = [s1, s2, s3, s4].filter((v) => v != null);
+      const maxDiff = neigh.length
+        ? Math.max(...neigh.map((v) => Math.abs(v - sy)))
+        : 0;
+      if (maxDiff > 2) continue; // too steep
+      const biomeLocal = this.generator.getBiomeAt(wx, wz);
+      if (biomeLocal !== "plains") continue; // arbres uniquement en plaine
+      this.generateTree(wx, sy + 1, wz, changed);
     }
     for (const key of changed) {
       const ch = this.chunks.get(key);
@@ -210,7 +233,7 @@ export class World {
       if (chunk.isDirty && !chunk.mesh) this.toBuild.push(chunk);
     }
     let builds = 0;
-    while (this.toBuild.length > 0 && builds < 2) {
+    while (this.toBuild.length > 0 && builds < 1) {
       const chunk = this.toBuild.shift();
       if (chunk && chunk.isDirty) {
         if (chunk.mesh) this.scene.remove(chunk.mesh);

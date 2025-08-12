@@ -65,6 +65,39 @@ scene.__highlighter = highlighter;
 
 const audio = createAudioEngine();
 
+function findSafeSpawn(world, centerX = 0, centerZ = 0) {
+  const candidates = [];
+  candidates.push([centerX, centerZ]);
+  const radii = [8, 16, 24, 32, 48, 64];
+  for (const r of radii) {
+    for (let a = 0; a < 8; a++) {
+      const ang = (a / 8) * Math.PI * 2;
+      const x = Math.round(centerX + Math.cos(ang) * r);
+      const z = Math.round(centerZ + Math.sin(ang) * r);
+      candidates.push([x, z]);
+    }
+  }
+  function safeY(x, z) {
+    const gen = world.generator;
+    // cherche un solide avec au moins 3 blocs d'air au-dessus
+    for (let y = 60; y >= 1; y--) {
+      const solid = gen.density(x, y, z) > 0;
+      const air1 = gen.density(x, y + 1, z) <= 0;
+      const air2 = gen.density(x, y + 2, z) <= 0;
+      const air3 = gen.density(x, y + 3, z) <= 0;
+      if (solid && air1 && air2 && air3) return y + 2; // place les pieds sur y+1
+    }
+    const h = gen.getHeightAt(x, z);
+    return h + 3;
+  }
+  for (const [x, z] of candidates) {
+    const y = safeY(x, z);
+    if (y > 2 && y < 62) return { x, y, z };
+  }
+  const h0 = world.generator.getHeightAt(centerX, centerZ);
+  return { x: centerX, y: h0 + 3, z: centerZ };
+}
+
 const skyPresets = [
   {
     name: "day",
@@ -129,6 +162,9 @@ function onToggleMusic(e) {
 document.addEventListener("keydown", onToggleMusic, true);
 
 const pointer = createPointerLock(renderer.domElement, player);
+const spawn = findSafeSpawn(world, 0, 0);
+player.position.set(spawn.x + 0.5, spawn.y, spawn.z + 0.5);
+camera.position.set(spawn.x + 0.5, spawn.y + 1.62, spawn.z + 0.5);
 playButton.addEventListener("click", () => {
   pointer.requestLock();
   const px = player.position.x;

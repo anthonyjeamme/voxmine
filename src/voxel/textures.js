@@ -2,7 +2,7 @@ import * as THREE from "three";
 
 export function createAtlasTexture(renderer) {
   const tileSize = 32;
-  const cols = 11; // étendu pour accueillir dark forest + grass_side
+  const cols = 13; // + sand, snow
   const rows = 2;
   const canvas = document.createElement("canvas");
   canvas.width = cols * tileSize;
@@ -414,6 +414,44 @@ export function createAtlasTexture(renderer) {
         dLeaves.width,
         dLeaves.height,
         tileSize * 9,
+        0,
+        tileSize,
+        tileSize
+      );
+      texture.needsUpdate = true;
+    }
+    const sandImg = await loadFirst([
+      "/textures/block/sand.png",
+      "/textures/sand.png",
+    ]);
+    if (sandImg) {
+      ctx.clearRect(tileSize * 11, 0, tileSize, tileSize);
+      ctx.drawImage(
+        sandImg,
+        0,
+        0,
+        sandImg.width,
+        sandImg.height,
+        tileSize * 11,
+        0,
+        tileSize,
+        tileSize
+      );
+      texture.needsUpdate = true;
+    }
+    const snowImg = await loadFirst([
+      "/textures/block/snow.png",
+      "/textures/snow.png",
+    ]);
+    if (snowImg) {
+      ctx.clearRect(tileSize * 12, 0, tileSize, tileSize);
+      ctx.drawImage(
+        snowImg,
+        0,
+        0,
+        snowImg.width,
+        snowImg.height,
+        tileSize * 12,
         0,
         tileSize,
         tileSize

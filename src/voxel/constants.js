@@ -2,8 +2,8 @@ export const CHUNK_SIZE = 16;
 export const CHUNK_HEIGHT = 64;
 export const WORLD_HEIGHT_MIN = 0;
 export const WORLD_HEIGHT_MAX = CHUNK_HEIGHT - 1;
-export const LOAD_DISTANCE_CHUNKS = 12;
-export const UNLOAD_DISTANCE_CHUNKS = 18;
+export const LOAD_DISTANCE_CHUNKS = 4;
+export const UNLOAD_DISTANCE_CHUNKS = 7;
 export const BLOCK_AIR = 0;
 export const BLOCK_GRASS = 1;
 export const BLOCK_DIRT = 2;
@@ -13,6 +13,8 @@ export const BLOCK_LOG = 5;
 export const BLOCK_LEAVES = 6;
 export const BLOCK_LOG_DARK = 7;
 export const BLOCK_LEAVES_DARK = 8;
+export const BLOCK_SAND = 9;
+export const BLOCK_SNOW = 10;
 export const BLOCK_TYPES = [
   BLOCK_AIR,
   BLOCK_GRASS,
@@ -23,6 +25,8 @@ export const BLOCK_TYPES = [
   BLOCK_LEAVES,
   BLOCK_LOG_DARK,
   BLOCK_LEAVES_DARK,
+  BLOCK_SAND,
+  BLOCK_SNOW,
 ];
 export const BLOCK_COLORS = {
   [BLOCK_AIR]: new Float32Array([0, 0, 0]),
@@ -34,6 +38,8 @@ export const BLOCK_COLORS = {
   [BLOCK_LEAVES]: new Float32Array([0.28, 0.6, 0.3]),
   [BLOCK_LOG_DARK]: new Float32Array([0.25, 0.18, 0.12]),
   [BLOCK_LEAVES_DARK]: new Float32Array([0.1, 0.3, 0.12]),
+  [BLOCK_SAND]: new Float32Array([0.9, 0.85, 0.6]),
+  [BLOCK_SNOW]: new Float32Array([0.95, 0.97, 1.0]),
 };
 export const BLOCK_TILE_INDEX = {
   [BLOCK_GRASS]: 0,
@@ -48,6 +54,8 @@ export const BLOCK_TILE_INDEX = {
   log_dark_top: 8,
   leaves_dark: 9,
   grass_side: 10,
+  sand: 11,
+  snow: 12,
 };
 export const GRASS_SIDE_TILE = BLOCK_TILE_INDEX.grass_side;
 export const GRASS_TOP_TILE = 0;
