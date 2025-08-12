@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Voxel World</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud">
+      <div id="stats"></div>
+      <div id="crosshair">+</div>
+      <div id="help">
+        <div>
+          WASD pour bouger, Espace pour sauter, Clic gauche casser, Clic droit
+          placer
+        </div>
+        <div>1: Grass, 2: Dirt, 3: Stone</div>
+        <button id="play">Cliquer pour démarrer</button>
+      </div>
+      <div id="hotbar" class="hotbar"></div>
+      <div id="inventory" class="inventory hidden">
+        <div class="inv-window">
+          <div class="inv-hotbar" id="inv-hotbar"></div>
+          <div class="inv-grid" id="inv-grid"></div>
+          <div class="inv-hint">I ou Échap pour fermer</div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
